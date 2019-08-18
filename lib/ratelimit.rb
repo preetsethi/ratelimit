@@ -1,8 +1,8 @@
 require 'redis'
 require 'redis-namespace'
+require 'logger'
 
 class Ratelimit
-
   # Create a Ratelimit object.
   #
   # @param [String] key A name to uniquely identify this rate limit. For example, 'emails'
@@ -11,6 +11,7 @@ class Ratelimit
   # @option options [Integer] :bucket_interval (5) How many seconds each bucket represents
   # @option options [Integer] :bucket_expiry (@bucket_span) How long we keep data in each bucket before it is auto expired. Cannot be larger than the bucket_span.
   # @option options [Redis]   :redis (nil) Redis client if you need to customize connection options
+  # @option options [Logger]  :logger (@logger) Logger instance
   #
   # @return [Ratelimit] Ratelimit instance
   #
@@ -30,7 +31,12 @@ class Ratelimit
       raise ArgumentError.new("Cannot have less than 3 buckets")
     end
     @raw_redis = options[:redis]
+    @logger = Logger.new($stdout).tap do |log|
+      log.progname = self.class.name
+    end
   end
+
+  attr_accessor :logger
 
   # Add to the counter for a given subject.
   #
@@ -92,6 +98,7 @@ class Ratelimit
   # @param [Hash] options Options hash
   # @option options [Integer] :interval How far back to retrieve activity.
   # @option options [Integer] :threshold Maximum number of actions
+  # @option options [Boolean] :log_threshold_breach Log subject and options when threshold is breached
   # @yield The block to be run
   #
   # @example Send an email as long as we haven't send 5 in the last 10 minutes
@@ -102,7 +109,11 @@ class Ratelimit
   def exec_within_threshold(subject, options = {}, &block)
     options[:threshold] ||= 30
     options[:interval] ||= 30
+    options[:log_threshold_breach] ||= false
     while exceeded?(subject, options)
+      if options[:log_threshold_breach]
+        logger.info("Threshold breached for #{subject} #{options.reject {|k,_| k == :log_threshold_breach}}")
+      end
       sleep @bucket_interval
     end
     yield(self)

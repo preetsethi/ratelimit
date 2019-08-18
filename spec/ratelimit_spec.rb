@@ -23,6 +23,7 @@ describe Ratelimit do
   before do
     @r = Ratelimit.new("key")
     @r.send(:redis).flushdb
+    @r.logger = instance_double("Logger")
   end
 
   it "should set_bucket_expiry to the bucket_span if not defined" do
@@ -103,12 +104,13 @@ describe Ratelimit do
     @value = nil
     expect do
       timeout(1) do
-        @r.exec_within_threshold("key", {:threshold => 30, :interval => 30}) do
+        @r.exec_within_threshold("key", {:threshold => 30, :interval => 30, :log_threshold_breach => true}) do
           @value = 2
         end
       end
     end.to raise_error(Timeout::Error)
     expect(@value).to be nil
+    expect(@r.logger).to receive(:info).with("Threshold breached for key {:threshold=>30, :interval=>30}")
     Timecop.travel(40) do
       @r.exec_within_threshold("key", {:threshold => 30, :interval => 30}) do
         @value = 1
